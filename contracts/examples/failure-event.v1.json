@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "event_id": "7b04e927-22b5-4a2b-b176-25244236ea5f",
+  "job_id": "job_8f2c91e4",
+  "attempt": 1,
+  "service": "mailer",
+  "queue": "email.delivery",
+  "occurred_at": "2026-10-24T12:00:00Z",
+  "error": {
+    "category": "ConnectionError",
+    "message": "SMTP connection refused"
+  },
+  "metadata": {
+    "provider": "internal-smtp"
+  }
+}

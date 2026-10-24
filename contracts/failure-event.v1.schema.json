@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://faultdeck.local/contracts/failure-event.v1.schema.json",
+  "title": "FaultDeck failure event v1",
+  "description": "An application-reported failed job attempt.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "event_id", "job_id", "attempt", "service", "queue", "occurred_at", "error"],
+  "properties": {
+    "version": { "const": 1 },
+    "event_id": { "type": "string", "format": "uuid" },
+    "job_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "service": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "queue": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category", "message"],
+      "properties": {
+        "category": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "message": { "type": "string", "minLength": 1, "maxLength": 512 }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "maxProperties": 10,
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "string", "maxLength": 200 },
+          { "type": "number" },
+          { "type": "boolean" }
+        ]
+      }
+    }
+  }
+}

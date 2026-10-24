@@ -2,6 +2,8 @@
 
 A self-hosted failure dashboard for RabbitMQ jobs. This repository currently contains the React 19 frontend and TypeScript API scaffolding; the RabbitMQ integration and Go collector are planned in [PLAN.md](PLAN.md).
 
+The first integration artifact is the [versioned failure-event contract](contracts/README.md). The publisher, collector, and persistence are not implemented yet.
+
 ## Local development
 
 ### All services with Docker
