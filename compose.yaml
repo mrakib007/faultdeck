@@ -31,6 +31,42 @@ services:
       timeout: 10s
       retries: 10
 
+  migrate:
+    image: postgres:16-alpine
+    environment:
+      PGPASSWORD: faultdeck_dev
+    volumes:
+      - ./db/migrations:/migrations:ro
+    command: ["psql", "-v", "ON_ERROR_STOP=1", "-h", "postgres", "-U", "faultdeck", "-d", "faultdeck", "-f", "/migrations/001_failure_events.sql"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  collector:
+    build:
+      context: .
+      dockerfile: services/collector/Dockerfile
+    environment:
+      DATABASE_URL: postgres://faultdeck:faultdeck_dev@postgres:5432/faultdeck
+      RABBITMQ_URL: amqp://faultdeck:faultdeck_dev@rabbitmq:5672
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+
+  worker:
+    profiles: [demo]
+    build:
+      context: .
+      dockerfile: services/collector/Dockerfile
+    command: ["worker"]
+    environment:
+      RABBITMQ_URL: amqp://faultdeck:faultdeck_dev@rabbitmq:5672
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
   backend:
     build:
       context: .

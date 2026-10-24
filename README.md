@@ -1,8 +1,8 @@
 # faultdeck
 
-A self-hosted failure dashboard for RabbitMQ jobs. This repository currently contains the React 19 frontend and TypeScript API scaffolding; the RabbitMQ integration and Go collector are planned in [PLAN.md](PLAN.md).
+A self-hosted failure dashboard for RabbitMQ jobs. The React dashboard still uses demo data and the TypeScript API only serves `/health`; a Go collector now records example failure events from RabbitMQ in PostgreSQL.
 
-The first integration artifact is the [versioned failure-event contract](contracts/README.md). The publisher, collector, and persistence are not implemented yet.
+The wire format is described in the [versioned failure-event contract](contracts/README.md).
 
 ## Local development
 
@@ -18,7 +18,18 @@ Open http://localhost:5173 for the frontend, http://localhost:3001/health for th
 
 PostgreSQL is available from the host on port `15432` (the backend connects internally on port `5432`).
 
-These are development-only credentials. The backend does not connect to PostgreSQL or RabbitMQ yet; the URLs are configured for when those integrations are built. The current images copy source at build time, so rebuild after editing code (`docker compose up --build`).
+These are development-only credentials. A one-shot migration creates `failure_events` on startup, including for existing PostgreSQL volumes. The collector owns writes; the API does not yet read PostgreSQL. Images copy source at build time, so rebuild after editing code (`docker compose up --build`).
+
+### Trigger and inspect one failed job
+
+With the stack running, in another terminal:
+
+```sh
+docker compose --profile demo run --build --rm worker
+docker compose exec postgres psql -U faultdeck -d faultdeck -c 'SELECT event_id, job_id, attempt, service, queue, error_category, error_message, occurred_at FROM failure_events ORDER BY stored_at DESC LIMIT 5;'
+```
+
+The worker simulates one failed email job, publishes a sanitized v1 event to the dedicated durable `faultdeck.failures` exchange/queue, and exits. Each run uses a fresh event ID; the collector inserts the row before acknowledging it. No application queues are consumed. The dashboard still shows demo data until the API and UI batches. Full validation, duplicate/restart/outage tests, and an invalid-event policy are reserved for batch 2.
 
 ### Run the apps outside Docker
 
