@@ -49,6 +49,7 @@ services:
     environment:
       DATABASE_URL: postgres://faultdeck:faultdeck_dev@postgres:5432/faultdeck
       RABBITMQ_URL: amqp://faultdeck:faultdeck_dev@rabbitmq:5672
+    restart: on-failure
     depends_on:
       migrate:
         condition: service_completed_successfully

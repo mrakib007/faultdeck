@@ -63,9 +63,23 @@ func run() error {
 	if err := channel.QueueBind("faultdeck.failures", "failure", "faultdeck.failures", false, nil); err != nil {
 		return err
 	}
-	if err := channel.PublishWithContext(context.Background(), "faultdeck.failures", "failure", false, false,
+	if err := channel.Confirm(false); err != nil {
+		return err
+	}
+	confirms := channel.NotifyPublish(make(chan amqp091.Confirmation, 1))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := channel.PublishWithContext(ctx, "faultdeck.failures", "failure", false, false,
 		amqp091.Publishing{ContentType: "application/json", DeliveryMode: amqp091.Persistent, Body: body}); err != nil {
 		return err
+	}
+	select {
+	case confirmation, ok := <-confirms:
+		if !ok || !confirmation.Ack {
+			return fmt.Errorf("rabbitmq did not confirm the event")
+		}
+	case <-ctx.Done():
+		return fmt.Errorf("timed out waiting for rabbitmq confirmation")
 	}
 	log.Printf("published failure event %s", eventID)
 	return nil

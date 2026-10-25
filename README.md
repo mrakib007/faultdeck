@@ -29,7 +29,20 @@ docker compose --profile demo run --build --rm worker
 docker compose exec postgres psql -U faultdeck -d faultdeck -c 'SELECT event_id, job_id, attempt, service, queue, error_category, error_message, occurred_at FROM failure_events ORDER BY stored_at DESC LIMIT 5;'
 ```
 
-The worker simulates one failed email job, publishes a sanitized v1 event to the dedicated durable `faultdeck.failures` exchange/queue, and exits. Each run uses a fresh event ID; the collector inserts the row before acknowledging it. No application queues are consumed. The dashboard still shows demo data until the API and UI batches. Full validation, duplicate/restart/outage tests, and an invalid-event policy are reserved for batch 2.
+The worker simulates one failed email job, publishes a sanitized v1 event to the dedicated durable `faultdeck.failures` exchange/queue, waits for RabbitMQ's publish confirmation, and exits. Each run uses a fresh event ID; the collector inserts the row before acknowledging it. No application queues are consumed. The dashboard still shows demo data until the API and UI batches.
+
+### Verify delivery reliability (local development only)
+
+With `docker compose up --build -d` already running:
+
+```sh
+go test ./...
+FAULTDECK_INTEGRATION=1 go test ./tests/integration -count=1 -v
+```
+
+The opt-in integration test publishes a duplicate event, blocks a database insert to check the message stays unacknowledged, restarts the collector, quarantines an invalid event, and **temporarily stops and restarts the Compose PostgreSQL container** to check redelivery. Do not run it while other work depends on that local database. It restores PostgreSQL and the collector afterward; it does not remove persistent volumes or existing failure rows.
+
+The collector accepts only v1 events matching the contract's fields and bounds. Invalid messages go to the durable `faultdeck.invalid` queue, with a reason header, after RabbitMQ confirms the quarantine copy; they are then acknowledged in the main queue. Quarantined bodies may contain sensitive data, so restrict RabbitMQ management access. They expire after seven days. A PostgreSQL write failure leaves the original message unacknowledged; the collector exits and Compose restarts it until the database is available. The event ID prevents a redelivery from creating another row. This is at-least-once handling, not a guarantee that publishers will never lose an event before RabbitMQ confirms it.
 
 ### Run the apps outside Docker
 
