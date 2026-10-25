@@ -1,12 +1,16 @@
-import express from 'express';
+import pg from 'pg';
+import { createApp } from './app.js';
 
-const app = express();
-
-app.get('/health', (_request, response) => {
-  response.json({ status: 'ok' });
-});
+const db = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const app = createApp(db);
 
 const port = Number(process.env.PORT ?? 3001);
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.log(`FaultDeck API listening on http://localhost:${port}`);
+});
+
+process.on('SIGTERM', () => {
+  server.close(() => {
+    void db.end();
+  });
 });

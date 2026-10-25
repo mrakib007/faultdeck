@@ -1,46 +1,42 @@
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
-  Activity, ArrowDownRight, ArrowUpRight, ArrowUpRightFromSquare, Braces,
-  Check, ChevronDown, ChevronRight, CircleDot, Clock3, Copy, Inbox,
-  Layers3, Search, Server, Terminal,
+  Activity, Braces, Check, ChevronDown, ChevronRight, CircleDot, Clock3,
+  Copy, Inbox, Layers3, RefreshCw, Search, Server, Terminal,
 } from 'lucide-react';
-import { incidents, type Incident, type Status } from './data';
+import { jobAttempts, listFailures, type Failure } from './api';
 
-type DetailTab = 'attempts' | 'context';
 type View = 'overview' | 'integration';
-type Filter = 'all' | Status;
 
-const filters: { value: Filter; label: string }[] = [
-  { value: 'all', label: 'All failures' },
-  { value: 'open', label: 'Open' },
-  { value: 'retrying', label: 'Retrying' },
-  { value: 'resolved', label: 'Resolved' },
-];
-
-function StatusTag({ status }: { status: Status }) {
-  return <span className={`status-tag status-${status}`}><span className="status-dot" />{status}</span>;
+function timeLabel(value: string) {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+  }).format(new Date(value)) + ' UTC';
 }
 
-function Metric({ label, value, footnote, icon, tone }: {
-  label: string; value: number | string; footnote: string;
-  icon: React.ReactNode; tone?: string;
+function Metric({ label, value, footnote, icon }: {
+  label: string; value: number | string; footnote: string; icon: React.ReactNode;
 }) {
   return (
     <div className="metric">
       <div className="metric-top"><span>{label}</span><span className="metric-icon">{icon}</span></div>
-      <div className={`metric-value ${tone ?? ''}`}>{value}</div>
+      <div className="metric-value">{value}</div>
       <div className="metric-footnote">{footnote}</div>
     </div>
   );
 }
 
-function Detail({ incident }: { incident: Incident }) {
-  const [tab, setTab] = useState<DetailTab>('attempts');
+function Detail({ failure }: { failure: Failure }) {
   const [copied, setCopied] = useState(false);
+  const { data: attempts, isPending, isError, error, isFetching, refetch } = useQuery({
+    queryKey: ['job-attempts', failure.job_id],
+    queryFn: ({ signal }) => jobAttempts(failure.job_id, signal),
+    refetchInterval: 30_000,
+  });
 
   async function copyId() {
     try {
-      await navigator.clipboard.writeText(incident.jobId);
+      await navigator.clipboard.writeText(failure.job_id);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -51,93 +47,81 @@ function Detail({ incident }: { incident: Incident }) {
   return (
     <section className="detail-panel" aria-label="Failure details">
       <div className="panel-heading">
-        <span className="eyebrow">INSPECTOR <span className="eyebrow-divider">/</span> {incident.id}</span>
-        <span className="panel-index">01 — 02</span>
+        <span className="eyebrow">INSPECTOR <span className="eyebrow-divider">/</span> FAILED ATTEMPT</span>
+        <span className="panel-index">{failure.event_id.slice(0, 8)}</span>
       </div>
-      <div className="detail-body" key={incident.id}>
-        <div className="detail-title-row"><span className="detail-alert"><Activity size={20} strokeWidth={1.8} /></span><StatusTag status={incident.status} /></div>
-        <h2>{incident.title}</h2>
-        <p className="detail-subtitle">First seen {incident.firstSeen} · Last seen {incident.lastSeen}</p>
+      <div className="detail-body" key={failure.event_id}>
+        <div className="detail-title-row"><span className="detail-alert"><Activity size={20} strokeWidth={1.8} /></span><span className="attempt-badge">Attempt {failure.attempt} failed</span></div>
+        <h2>{failure.error.category}</h2>
+        <p className="detail-subtitle">Occurred {timeLabel(failure.occurred_at)}</p>
 
         <div className="detail-fields">
-          <div><span className="field-label">SERVICE</span><span className="field-value"><Server size={14} />{incident.service}</span></div>
-          <div><span className="field-label">QUEUE</span><span className="field-value"><Layers3 size={14} />{incident.queue}</span></div>
-          <div className="field-wide"><span className="field-label">LATEST JOB ID</span><button className="copy-field" onClick={copyId} title="Copy job ID"><code>{incident.jobId}</code>{copied ? <Check size={14} /> : <Copy size={14} />}</button></div>
+          <div><span className="field-label">SERVICE</span><span className="field-value"><Server size={14} />{failure.service}</span></div>
+          <div><span className="field-label">JOB QUEUE</span><span className="field-value"><Layers3 size={14} />{failure.queue}</span></div>
+          <div className="field-wide"><span className="field-label">JOB ID</span><button className="copy-field" onClick={copyId} title="Copy job ID"><code>{failure.job_id}</code>{copied ? <Check size={14} /> : <Copy size={14} />}</button></div>
         </div>
 
-        <div className="section-label"><span>LAST ERROR</span><span className="section-line" /></div>
-        <div className="error-box"><span className="error-caret">›</span><code>{incident.error}</code></div>
+        <div className="section-label"><span>ERROR MESSAGE</span><span className="section-line" /></div>
+        <div className="error-box"><span className="error-caret">›</span><code>{failure.error.message}</code></div>
 
-        <div className="tab-list" role="tablist" aria-label="Failure details">
-          <button role="tab" aria-selected={tab === 'attempts'} className={tab === 'attempts' ? 'active' : ''} onClick={() => setTab('attempts')}>Attempt history <span>{incident.attempts.length}</span></button>
-          <button role="tab" aria-selected={tab === 'context'} className={tab === 'context' ? 'active' : ''} onClick={() => setTab('context')}>Context</button>
+        <div className="section-label"><span>FAILED ATTEMPTS FOR THIS JOB</span><span className="section-line" /></div>
+        {isPending && !isError && <div className="inline-state" role="status">Loading attempt history…</div>}
+        {isError && <div className="inline-state state-error" role="alert">{error.message} <button onClick={() => void refetch()}>Retry</button></div>}
+        {attempts && <div className="timeline" aria-label="Failed attempt history">
+          {attempts.map((attempt) => (
+            <div className="timeline-item" key={attempt.event_id}>
+              <div className="timeline-node failed"><CircleDot size={12} /></div>
+              <div className="timeline-content"><div className="timeline-top"><strong>{attempt.error.category}</strong><time>{timeLabel(attempt.occurred_at)}</time></div><p>Attempt {attempt.attempt} <span className="timeline-separator">/</span> {attempt.error.message}</p></div>
+            </div>
+          ))}
+        </div>}
+        {isFetching && attempts && <span className="refresh-note">Refreshing attempt history…</span>}
+
+        <div className="section-label"><span>ALLOWLISTED METADATA · SELECTED EVENT</span><span className="section-line" /></div>
+        <div className="context-panel">
+          {Object.keys(failure.metadata).length
+            ? <pre>{JSON.stringify(failure.metadata, null, 2)}</pre>
+            : <p>No metadata was reported for this event.</p>}
         </div>
-
-        {tab === 'attempts' ? (
-          <div className="timeline" role="tabpanel">
-            {incident.attempts.map((attempt) => (
-              <div className="timeline-item" key={attempt.number}>
-                <div className={`timeline-node ${attempt.outcome}`}><CircleDot size={12} /></div>
-                <div className="timeline-content"><div className="timeline-top"><strong>{attempt.result}</strong><time>{attempt.time}</time></div><p>Attempt {attempt.number} <span className="timeline-separator">/</span> {attempt.detail}</p></div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="context-panel" role="tabpanel">
-            <div className="context-title"><Braces size={15} /> Allowlisted event metadata</div>
-            <pre>{JSON.stringify(incident.metadata, null, 2)}</pre>
-            <p>Full job payloads are not stored in this demo.</p>
-          </div>
-        )}
       </div>
-      <div className="panel-footer"><span className="footer-pulse" /> DEMO DATA <span className="footer-spacer" /> NO LIVE BROKER CONNECTED</div>
+      <div className="panel-footer"><span className="footer-pulse" /> DATABASE RECORD <span className="footer-spacer" /> NO SUCCESS OR RETRY STATUS REPORTED</div>
     </section>
   );
 }
 
 function Integration() {
-  const example = `{
-  "version": 1,
-  "event_id": "evt_unique_id",
-  "service": "mailer",
-  "queue": "email.delivery",
-  "job_id": "job_123",
-  "attempt": 1,
-  "error": "Connection refused"
-}`;
   return (
     <section className="integration-panel">
-      <span className="eyebrow">INTEGRATION <span className="eyebrow-divider">/</span> 01</span>
+      <span className="eyebrow">INTEGRATION <span className="eyebrow-divider">/</span> GETTING STARTED</span>
       <div className="integration-icon"><Braces size={23} /></div>
       <h2>Bring your failures<br />into focus.</h2>
-      <p>FaultDeck will accept opt-in failure events from your workers through a dedicated RabbitMQ monitoring exchange. It will not consume your application queues.</p>
-      <div className="section-label"><span>EVENT SHAPE · PREVIEW</span><span className="section-line" /></div>
-      <pre className="integration-code">{example}</pre>
-      <div className="integration-note"><CircleDot size={15} /> Integration is planned. The dashboard currently shows local demo events.</div>
+      <p>Workers opt in by publishing version 1 failure events to the dedicated <code>faultdeck.failures</code> RabbitMQ exchange. FaultDeck does not consume your application queues.</p>
+      <div className="section-label"><span>TRY A REAL FAILURE LOCALLY</span><span className="section-line" /></div>
+      <pre className="integration-code">docker compose --profile demo run --build --rm worker</pre>
+      <p>Run this from the repository root, then return to the overview and refresh the feed. The wire format and privacy guidance are in <code>contracts/README.md</code>.</p>
     </section>
   );
 }
 
 function App() {
-  const [selectedId, setSelectedId] = useState(incidents[0].id);
-  const [filter, setFilter] = useState<Filter>('all');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [service, setService] = useState('all');
   const [search, setSearch] = useState('');
   const [view, setView] = useState<View>('overview');
   const searchRef = useRef<HTMLInputElement>(null);
   const feedRef = useRef<HTMLDivElement>(null);
-
-  const services = useMemo(() => ['all', ...new Set(incidents.map((incident) => incident.service))], []);
-  const visible = incidents.filter((incident) => {
-    const query = search.trim().toLowerCase();
-    return (filter === 'all' || incident.status === filter)
-      && (service === 'all' || incident.service === service)
-      && (!query || [incident.title, incident.id, incident.service, incident.queue, incident.jobId].some((field) => field.toLowerCase().includes(query)));
+  const { data: failures, isPending, isError, error, isFetching, refetch } = useQuery({
+    queryKey: ['failures'], queryFn: ({ signal }) => listFailures(signal), refetchInterval: 30_000,
   });
-  const selected = visible.find((incident) => incident.id === selectedId) ?? visible[0];
-  const openCount = incidents.filter((incident) => incident.status === 'open').length;
-  const retryCount = incidents.filter((incident) => incident.status === 'retrying').length;
-  const resolvedCount = incidents.filter((incident) => incident.status === 'resolved').length;
+
+  const services = [...new Set((failures ?? []).map((failure) => failure.service))].sort();
+  const visible = (failures ?? []).filter((failure) => {
+    const query = search.trim().toLowerCase();
+    return (service === 'all' || failure.service === service) &&
+      (!query || [failure.error.category, failure.error.message, failure.event_id, failure.job_id,
+        failure.service, failure.queue].some((field) => field.toLowerCase().includes(query)));
+  });
+  const selected = visible.find((failure) => failure.event_id === selectedId) ?? visible[0];
 
   function showFeed() {
     setView('overview');
@@ -152,35 +136,39 @@ function App() {
         <nav aria-label="Main navigation">
           <span className="nav-label">WORKSPACE</span>
           <button className={`nav-item ${view === 'overview' ? 'selected' : ''}`} onClick={() => { setView('overview'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}><Activity size={17} /> Overview <span className="nav-shortcut">01</span></button>
-          <button className="nav-item" onClick={showFeed}><Inbox size={17} /> Failure feed <span className="nav-count">{incidents.length}</span></button>
+          <button className="nav-item" onClick={showFeed}><Inbox size={17} /> Failure feed <span className="nav-count">{failures?.length ?? '—'}</span></button>
           <span className="nav-label nav-label-second">SYSTEM</span>
           <button className={`nav-item ${view === 'integration' ? 'selected' : ''}`} onClick={() => setView('integration')}><Braces size={17} /> Integration <ChevronRight className="nav-trail" size={15} /></button>
         </nav>
-        <div className="sidebar-bottom"><div className="environment-card"><div className="env-heading"><span className="env-dot" /> ENVIRONMENT <span className="env-label">LOCAL</span></div><div className="env-row"><span>RabbitMQ</span><span className="env-state">Not connected</span></div><div className="env-row"><span>Collector</span><span className="env-state">Not connected</span></div></div><div className="sidebar-version"><Terminal size={14} /> faultdeck / preview <span>v0.1</span></div></div>
+        <div className="sidebar-bottom"><div className="environment-card"><div className="env-heading"><span className="env-dot" /> ENVIRONMENT <span className="env-label">LOCAL</span></div><div className="env-row"><span>Failure records</span><span className="env-state">{isError ? 'Unavailable' : isPending ? 'Loading' : 'From API'}</span></div></div><div className="sidebar-version"><Terminal size={14} /> faultdeck / local <span>v0.1</span></div></div>
       </aside>
 
       <main className="main-content">
-        <header className="topbar"><div className="breadcrumbs"><span>WORKSPACE</span><ChevronRight size={13} /><strong>{view === 'overview' ? 'Overview' : 'Integration'}</strong></div><div className="topbar-right"><span className="demo-indicator"><span /> DEMO MODE</span><span className="topbar-divider" /><span className="topbar-date">24 OCT 2026</span><span className="user-avatar">FD</span></div></header>
+        <header className="topbar"><div className="breadcrumbs"><span>WORKSPACE</span><ChevronRight size={13} /><strong>{view === 'overview' ? 'Overview' : 'Integration'}</strong></div><div className="topbar-right"><span className="demo-indicator"><span /> POSTGRESQL DATA</span><span className="topbar-divider" /><span className="topbar-date">{new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }).toUpperCase()}</span><span className="user-avatar">FD</span></div></header>
 
-        {view === 'integration' ? <div className="page-content integration-page"><div className="page-intro"><div className="page-kicker"><span className="kicker-square" /> GETTING STARTED <span className="kicker-line" /> 01 / 01</div><h1>Connect a worker<span className="heading-period">.</span></h1><p>One event contract. A clearer picture of every failure.</p></div><Integration /></div> : (
+        {view === 'integration' ? <div className="page-content integration-page"><div className="page-intro"><div className="page-kicker"><span className="kicker-square" /> GETTING STARTED</div><h1>Connect a worker<span className="heading-period">.</span></h1><p>One event contract. A clearer picture of every failure.</p></div><Integration /></div> : (
           <div className="page-content">
-            <div className="page-intro"><div className="page-kicker"><span className="kicker-square" /> OBSERVABILITY <span className="kicker-line" /> OVERVIEW</div><div className="page-title-row"><div><h1>Failure overview<span className="heading-period">.</span></h1><p>A clearer view of what broke, when, and why.</p></div><div className="snapshot-label"><Clock3 size={15} /><span>STATIC SNAPSHOT<br /><strong>24 OCT · 11:45 UTC</strong></span></div></div></div>
+            <div className="page-intro"><div className="page-kicker"><span className="kicker-square" /> OBSERVABILITY <span className="kicker-line" /> OVERVIEW</div><div className="page-title-row"><div><h1>Failure overview<span className="heading-period">.</span></h1><p>Recent reported failed attempts, not inferred job status.</p></div><div className="snapshot-label"><Clock3 size={15} /><span>API FEED<br /><strong>REFRESHES EVERY 30S</strong></span></div></div></div>
 
-            <div className="metrics-grid"><Metric label="TOTAL GROUPS" value={incidents.length.toString().padStart(2, '0')} footnote="In this demo snapshot" icon={<Layers3 size={17} />} /><Metric label="OPEN" value={openCount.toString().padStart(2, '0')} footnote="Needs investigation" icon={<ArrowUpRight size={17} />} tone="text-red" /><Metric label="RETRYING" value={retryCount.toString().padStart(2, '0')} footnote="Waiting for next attempt" icon={<Activity size={17} />} tone="text-amber" /><Metric label="RESOLVED" value={resolvedCount.toString().padStart(2, '0')} footnote="Recovered in snapshot" icon={<ArrowDownRight size={17} />} tone="text-green" /></div>
+            <div className="metrics-grid"><Metric label="FAILED EVENTS" value={failures?.length ?? '—'} footnote="In the latest 100 events" icon={<Activity size={17} />} /><Metric label="JOBS" value={failures ? new Set(failures.map((failure) => failure.job_id)).size : '—'} footnote="In this feed" icon={<Inbox size={17} />} /><Metric label="SERVICES" value={failures ? services.length : '—'} footnote="In this feed" icon={<Layers3 size={17} />} /><Metric label="LATEST FAILURE" value={failures?.length ? timeLabel(failures[0].occurred_at) : '—'} footnote="Occurred at · UTC" icon={<Clock3 size={17} />} /></div>
 
-            <div className="section-heading" ref={feedRef}><div><div className="page-kicker section-kicker"><span className="kicker-square" /> LIVE SURFACE <span className="kicker-line" /> 01</div><h2>Failure feed <span className="heading-count">/ {incidents.length.toString().padStart(2, '0')}</span></h2></div><div className="feed-hint"><span className="hint-key">↵</span> Select an event to inspect</div></div>
+            <div className="section-heading" ref={feedRef}><div><div className="page-kicker section-kicker"><span className="kicker-square" /> RECENT EVENTS <span className="kicker-line" /> 01</div><h2>Failure feed <span className="heading-count">/ {failures?.length ?? '—'}</span></h2></div><button className="refresh-button" onClick={() => void refetch()} disabled={isFetching}><RefreshCw size={14} /> {isFetching ? 'Refreshing…' : 'Refresh'}</button></div>
 
             <div className="workspace-grid">
               <section className="feed-panel" aria-label="Failure feed">
-                <div className="feed-toolbar"><div className="search-box"><Search size={16} /><input ref={searchRef} type="search" placeholder="Search failures, queues, IDs..." value={search} onChange={(event) => setSearch(event.target.value)} aria-label="Search failures" /><button onClick={() => searchRef.current?.focus()} aria-label="Focus search" className="search-shortcut">/</button></div><label className="service-filter"><span className="sr-only">Filter by service</span><select value={service} onChange={(event) => setService(event.target.value)}><option value="all">All services</option>{services.slice(1).map((name) => <option key={name} value={name}>{name}</option>)}</select><ChevronDown size={14} /></label></div>
-                <div className="filter-bar" role="group" aria-label="Filter by status">{filters.map((item) => <button key={item.value} className={filter === item.value ? 'filter-active' : ''} onClick={() => setFilter(item.value)}>{item.label}{item.value === 'all' && <span>{incidents.length}</span>}</button>)}</div>
-                <div className="list-header"><span>FAILURE / SERVICE</span><span>STATUS</span><span>LAST SEEN</span></div>
-                <div className="failure-list">{visible.length ? visible.map((incident) => <button key={incident.id} className={`failure-row ${selected.id === incident.id ? 'row-selected' : ''}`} onClick={() => { setSelectedId(incident.id); setView('overview'); }} aria-pressed={selected.id === incident.id}><div className="row-main"><div className="row-icon"><Activity size={16} strokeWidth={1.8} /></div><div className="row-text"><strong>{incident.title}</strong><span><code>{incident.id}</code><i />{incident.service} <span className="row-slash">/</span> {incident.queue}</span></div></div><div className="row-status"><StatusTag status={incident.status} /></div><div className="row-end"><time>{incident.lastSeen}</time><span>{incident.count} events</span></div><ChevronRight className="row-chevron" size={15} /></button>) : <div className="empty-state"><Search size={22} /><strong>No matching failures</strong><span>Try another search term or change the filters.</span><button onClick={() => { setSearch(''); setFilter('all'); setService('all'); }}>Clear filters</button></div>}</div>
-                <div className="feed-footer"><span>SHOWING {visible.length} OF {incidents.length} GROUPS</span><span>LOCAL DATASET <ArrowUpRightFromSquare size={13} /></span></div>
+                <div className="feed-toolbar"><div className="search-box"><Search size={16} /><input ref={searchRef} type="search" placeholder="Search loaded failures, queues, IDs..." value={search} onChange={(event) => setSearch(event.target.value)} aria-label="Search loaded failures" /><button onClick={() => searchRef.current?.focus()} aria-label="Focus search" className="search-shortcut">/</button></div><label className="service-filter"><span className="sr-only">Filter by service</span><select value={service} onChange={(event) => setService(event.target.value)}><option value="all">All services</option>{services.map((name) => <option key={name} value={name}>{name}</option>)}</select><ChevronDown size={14} /></label></div>
+                <div className="list-header"><span>FAILURE / SERVICE</span><span>ATTEMPT</span><span>OCCURRED</span></div>
+                {isError && <div className="feed-alert" role="alert">{error.message} {failures ? 'Showing the last loaded results.' : 'Unable to load failures.'} <button onClick={() => void refetch()}>Try again</button></div>}
+                {isError && !failures ? <div className="detail-empty">No failure records are available right now.</div>
+                  : isPending ? <div className="empty-state" role="status"><RefreshCw size={22} /><strong>Loading failures…</strong><span>Fetching recent events from the API.</span></div>
+                    : !failures?.length ? <div className="empty-state"><Inbox size={22} /><strong>No failures reported yet</strong><span>Run the example worker to publish a failure, then refresh this page.</span></div>
+                      : !visible.length ? <div className="empty-state"><Search size={22} /><strong>No matching failures</strong><span>Search and service filters apply to the latest 100 events only.</span><button onClick={() => { setSearch(''); setService('all'); }}>Clear filters</button></div>
+                        : <div className="failure-list">{visible.map((failure) => <button key={failure.event_id} className={`failure-row ${selected?.event_id === failure.event_id ? 'row-selected' : ''}`} onClick={() => setSelectedId(failure.event_id)} aria-pressed={selected?.event_id === failure.event_id}><div className="row-main"><div className="row-icon"><Activity size={16} strokeWidth={1.8} /></div><div className="row-text"><strong>{failure.error.category}: {failure.error.message}</strong><span><code>{failure.event_id.slice(0, 8)}</code><i />{failure.service} <span className="row-slash">/</span> {failure.queue}</span></div></div><div className="row-status"><span className="attempt-badge">#{failure.attempt} failed</span></div><div className="row-end"><time>{timeLabel(failure.occurred_at)}</time></div><ChevronRight className="row-chevron" size={15} /></button>)}</div>}
+                <div className="feed-footer"><span>SHOWING {visible.length} OF {failures?.length ?? 0} RECENT EVENTS</span><span>SEARCH FILTERS LOADED EVENTS ONLY</span></div>
               </section>
-              {selected ? <Detail incident={selected} /> : <div className="detail-panel detail-empty">No failure selected.</div>}
+              {selected && !(isError && !failures) ? <Detail key={selected.event_id} failure={selected} /> : <div className="detail-panel detail-empty">{isPending ? 'Loading details…' : 'Select a failure to inspect its job history.'}</div>}
             </div>
-            <footer className="page-footer"><span>FAULTDECK <span className="footer-divider">/</span> A BETTER VIEW OF FAILURE</span><span>BUILT FOR THE MOMENTS THAT MATTER <span className="footer-star">✳</span></span></footer>
+            <footer className="page-footer"><span>FAULTDECK <span className="footer-divider">/</span> A BETTER VIEW OF FAILURE</span><span>FAILED ATTEMPTS ONLY <span className="footer-star">✳</span></span></footer>
           </div>
         )}
       </main>

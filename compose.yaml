@@ -88,6 +88,8 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
+    environment:
+      API_PROXY_TARGET: http://backend:3001
     ports:
       - "127.0.0.1:5173:5173"
     depends_on:
